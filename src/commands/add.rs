@@ -1,15 +1,15 @@
-use anyhow::{anyhow, Result};
-use chrono::Utc;
-use std::fs;
-use std::path::PathBuf;
-use uuid::Uuid;
-
 use crate::cli::Cli;
 use crate::crypto::Crypto;
 use crate::git::Git;
 use crate::storage::Storage;
 use crate::types::{Entry, EntryMetadata, EntryType};
 use crate::utils;
+use anyhow::{Result, anyhow};
+use chrono::Utc;
+use colored::*;
+use std::fs;
+use std::path::PathBuf;
+use uuid::Uuid;
 
 pub async fn execute(
     key: String,
@@ -19,19 +19,52 @@ pub async fn execute(
     vault: Option<String>,
 ) -> Result<()> {
     let storage = Storage::new(vault)?;
-    
+
     if !storage.vault_exists() {
         return Err(anyhow!("Vault not initialized. Run 'bunker init' first"));
     }
-    
+
     // Get master key
     let master_key = utils::get_master_key(Some(storage.get_vault_name().to_string()))?;
-    
+
+    // Check if entry already exists and warn about overwriting
+    if storage.entry_exists(&key)? {
+        let existing_entry = storage.load_entry(&key, &master_key)?;
+        println!("⚠️  Warning: Entry '{}' already exists!", key.yellow());
+        println!(
+            "   Current type: {}",
+            existing_entry.metadata.entry_type.to_string().cyan()
+        );
+
+        // Show a preview of existing content (masked for security)
+        let existing_value = Crypto::decrypt(&existing_entry.value, &master_key)?;
+        let existing_str = String::from_utf8(existing_value).unwrap_or_default();
+        let preview = if existing_str.len() > 10 {
+            format!(
+                "{}***{}",
+                &existing_str[..3],
+                &existing_str[existing_str.len() - 3..]
+            )
+        } else {
+            "***".to_string()
+        };
+        println!("   Current value: {}", preview.cyan());
+
+        let confirm = utils::prompt_confirm(&format!(
+            "This will OVERWRITE the existing entry. Continue?"
+        ))?;
+        if !confirm {
+            println!("{}", "Operation cancelled".yellow());
+            return Ok(());
+        }
+        println!("{}", "Proceeding with overwrite...".yellow());
+    }
+
     // Determine entry type and value
     let (entry_type, entry_value) = if let Some(file_path) = file {
         // Read file content
-        let content = fs::read_to_string(&file_path)
-            .map_err(|e| anyhow!("Failed to read file: {}", e))?;
+        let content =
+            fs::read_to_string(&file_path).map_err(|e| anyhow!("Failed to read file: {}", e))?;
         (EntryType::SecureFile, content)
     } else if note {
         // Get note content
@@ -51,7 +84,7 @@ pub async fn execute(
         };
         (EntryType::Password, password)
     };
-    
+
     // Create metadata
     let metadata = EntryMetadata {
         entry_type,
@@ -63,10 +96,10 @@ pub async fn execute(
         expires_at: None,
         auto_type: None,
     };
-    
+
     // Encrypt the value
     let encrypted_value = Crypto::encrypt(entry_value.as_bytes(), &master_key)?;
-    
+
     // Create entry
     let entry = Entry {
         id: Uuid::new_v4(),
@@ -77,21 +110,21 @@ pub async fn execute(
         updated_at: Utc::now(),
         accessed_at: None,
     };
-    
+
     // Store entry
     storage.store_entry(&entry, &master_key)?;
-    
+
     // Commit if git enabled
     let config = storage.load_config()?;
     if Git::is_repo(storage.get_vault_path())? {
         Git::commit(storage.get_vault_path(), &format!("Add {}", key))?;
-        
+
         if config.auto_sync && config.git_remote.is_some() {
             let _ = Git::push(storage.get_vault_path());
         }
     }
-    
+
     Cli::print_entry_added(&key);
-    
+
     Ok(())
 }

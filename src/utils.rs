@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clipboard::{ClipboardContext, ClipboardProvider};
 use colored::*;
 use dialoguer::{Confirm, Input, Password};
@@ -36,11 +36,11 @@ pub fn prompt_password(prompt: &str) -> Result<String> {
         .with_prompt(prompt)
         .interact()
         .map_err(|e| anyhow!("Failed to read password: {}", e))?;
-    
+
     if password.is_empty() {
         return Err(anyhow!("Password cannot be empty"));
     }
-    
+
     Ok(password)
 }
 
@@ -48,11 +48,11 @@ pub fn prompt_password(prompt: &str) -> Result<String> {
 pub fn prompt_password_confirm(prompt: &str) -> Result<String> {
     let password = prompt_password(prompt)?;
     let confirm = prompt_password("Confirm password")?;
-    
+
     if password != confirm {
         return Err(anyhow!("Passwords do not match"));
     }
-    
+
     Ok(password)
 }
 
@@ -62,7 +62,7 @@ pub fn prompt_input(prompt: &str) -> Result<String> {
         .with_prompt(prompt)
         .interact_text()
         .map_err(|e| anyhow!("Failed to read input: {}", e))?;
-    
+
     Ok(input)
 }
 
@@ -73,7 +73,7 @@ pub fn prompt_input_optional(prompt: &str) -> Result<Option<String>> {
         .allow_empty(true)
         .interact_text()
         .map_err(|e| anyhow!("Failed to read input: {}", e))?;
-    
+
     if input.is_empty() {
         Ok(None)
     } else {
@@ -87,18 +87,18 @@ pub fn prompt_confirm(prompt: &str) -> Result<bool> {
         .with_prompt(prompt)
         .interact()
         .map_err(|e| anyhow!("Failed to read confirmation: {}", e))?;
-    
+
     Ok(confirmed)
 }
 
 /// Copy to clipboard
 pub fn copy_to_clipboard(text: &str, timeout_seconds: u64) -> Result<()> {
-    let mut ctx: ClipboardContext = ClipboardProvider::new()
-        .map_err(|e| anyhow!("Failed to access clipboard: {}", e))?;
-    
+    let mut ctx: ClipboardContext =
+        ClipboardProvider::new().map_err(|e| anyhow!("Failed to access clipboard: {}", e))?;
+
     ctx.set_contents(text.to_string())
         .map_err(|e| anyhow!("Failed to copy to clipboard: {}", e))?;
-    
+
     if timeout_seconds > 0 {
         let clear_text = text.to_string();
         thread::spawn(move || {
@@ -115,7 +115,7 @@ pub fn copy_to_clipboard(text: &str, timeout_seconds: u64) -> Result<()> {
             }
         });
     }
-    
+
     Ok(())
 }
 
@@ -127,7 +127,8 @@ pub fn mask_password(password: &str, show_chars: usize) -> String {
     } else {
         let start = &password[..show_chars];
         let end = &password[password.len() - show_chars..];
-        format!("{}{}{}",
+        format!(
+            "{}{}{}",
             start,
             "*".repeat(password.len() - show_chars * 2),
             end
@@ -138,32 +139,32 @@ pub fn mask_password(password: &str, show_chars: usize) -> String {
 /// Format tree structure
 pub fn format_tree(entries: &[String], prefix: &str) -> String {
     let mut tree = String::new();
-    let mut path_tree: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
-    
+    let mut path_tree: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+
     // Build tree structure
     for entry in entries {
         let parts: Vec<&str> = entry.split('/').collect();
         if parts.len() == 1 {
-            path_tree.entry(String::new())
+            path_tree
+                .entry(String::new())
                 .or_insert_with(Vec::new)
                 .push(entry.clone());
         } else {
             let dir = parts[0].to_string();
             let rest = parts[1..].join("/");
-            path_tree.entry(dir)
-                .or_insert_with(Vec::new)
-                .push(rest);
+            path_tree.entry(dir).or_insert_with(Vec::new).push(rest);
         }
     }
-    
+
     // Render tree
     let mut items: Vec<_> = path_tree.iter().collect();
     items.sort_by_key(|&(k, _)| k);
-    
+
     for (i, (dir, children)) in items.iter().enumerate() {
         let is_last = i == items.len() - 1;
         let connector = if is_last { "└──" } else { "├──" };
-        
+
         if dir.is_empty() {
             // Root level entries
             for child in children.iter() {
@@ -172,68 +173,49 @@ pub fn format_tree(entries: &[String], prefix: &str) -> String {
         } else {
             // Directory
             tree.push_str(&format!("{}{} {}/\n", prefix, connector, dir.blue().bold()));
-            
+
             // Recursively format children
             let child_prefix = if is_last {
                 format!("{}    ", prefix)
             } else {
                 format!("{}│   ", prefix)
             };
-            
+
             let child_tree = format_tree(children, &child_prefix);
             tree.push_str(&child_tree);
         }
     }
-    
+
     tree
 }
 
-/// Get master key (from session or prompt) - Smart authentication
+/// Get master key (from permanent storage) - Passwordless after setup
 pub fn get_master_key(vault_name: Option<String>) -> Result<MasterKey> {
     let storage = Storage::new(vault_name)?;
-    
-    // Try to load from existing session
-    if let Ok(_session) = storage.load_session() {
-        // Session exists, try to use stored session password
-        if let Ok(session_password) = get_cached_session_password() {
-            if let Ok(master_key) = storage.load_master_key_from_session(&session_password) {
-                return Ok(master_key);
-            }
-        }
-        
-        // Session exists but can't decrypt, ask for session password
-        println!("{}", "🔐 Vault is locked. Enter your session password to unlock:".cyan());
-        let session_password = prompt_password("Session password")?;
-        
-        match storage.load_master_key_from_session(&session_password) {
-            Ok(master_key) => {
-                // Cache session password for this terminal session
-                cache_session_password(&session_password)?;
-                return Ok(master_key);
-            }
-            Err(_) => {
-                // Invalid session password, clear session and continue to master password
-                let _ = storage.clear_session();
-                println!("{}", "Invalid session password. Please enter your master password.".yellow());
-            }
-        }
+
+    // Try to load from permanent storage first
+    if let Ok(master_key) = storage.load_master_key_permanently() {
+        return Ok(master_key);
     }
-    
-    // No valid session, prompt for master password
+
+    // No permanent storage found - this should only happen on first use after vault creation
+    // or if permanent storage was corrupted
+    println!("{}", "🔐 Setting up passwordless access...".cyan());
     let password = prompt_password("Enter master password")?;
-    
+
     // Derive key with vault-specific salt
     let config = storage.load_config()?;
     let salt = config.id.as_bytes();
     let master_key = Crypto::derive_key(&password, salt)?;
-    
-    // Create new session for convenience (24 hours default)
-    let session_password = generate_session_password();
-    let _ = storage.create_session(&master_key, &session_password, 24);
-    cache_session_password(&session_password)?;
-    
-    println!("{}", "✓ Session created. You won't need to enter your password again for 24 hours.".green());
-    
+
+    // Store master key permanently for future use
+    storage.store_master_key_permanently(&master_key)?;
+
+    println!(
+        "{}",
+        "✓ Passwordless access configured. You'll never need to enter your password again!".green()
+    );
+
     Ok(master_key)
 }
 
@@ -259,8 +241,7 @@ fn cache_session_password(password: &str) -> Result<()> {
 
 /// Get cached session password from memory
 fn get_cached_session_password() -> Result<String> {
-    std::env::var("BUNKER_SESSION_KEY")
-        .map_err(|_| anyhow!("No cached session password"))
+    std::env::var("BUNKER_SESSION_KEY").map_err(|_| anyhow!("No cached session password"))
 }
 
 /// Parse key-value pairs from string
@@ -269,22 +250,22 @@ pub fn parse_key_value(input: &str) -> Result<(String, String)> {
     if parts.len() != 2 {
         return Err(anyhow!("Invalid format. Expected: key=value"));
     }
-    
+
     Ok((parts[0].trim().to_string(), parts[1].trim().to_string()))
 }
 
 /// Generate QR code
 pub fn generate_qr_code(data: &str) -> Result<String> {
     use qrcode::{QrCode, render::unicode};
-    
-    let code = QrCode::new(data)
-        .map_err(|e| anyhow!("Failed to generate QR code: {}", e))?;
-    
-    let string = code.render::<unicode::Dense1x2>()
+
+    let code = QrCode::new(data).map_err(|e| anyhow!("Failed to generate QR code: {}", e))?;
+
+    let string = code
+        .render::<unicode::Dense1x2>()
         .dark_color(unicode::Dense1x2::Light)
         .light_color(unicode::Dense1x2::Dark)
         .build();
-    
+
     Ok(string)
 }
 

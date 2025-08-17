@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -26,7 +26,7 @@ impl Default for Config {
         Self {
             default_vault: "default".to_string(),
             editor: None,
-            auto_sync: false,
+            auto_sync: true,
             auto_lock_minutes: Some(15),
             clipboard_timeout: 45,
             theme: Theme {
@@ -41,13 +41,13 @@ impl Config {
     /// Load configuration
     pub fn load() -> Result<Self> {
         let config_path = Self::config_path()?;
-        
+
         if !config_path.exists() {
             let config = Self::default();
             config.save()?;
             return Ok(config);
         }
-        
+
         let config_data = fs::read_to_string(config_path)?;
         let config: Config = toml::from_str(&config_data)?;
         Ok(config)

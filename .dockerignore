@@ -1,0 +1,89 @@
+# Build artifacts
+target/
+**/target/
+*.rs.bk
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation
+README.md
+CHANGELOG.md
+LICENSE
+*.md
+
+# Docker files
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Test files
+tests/
+**/tests/
+*.test.rs
+*.spec.rs
+
+# Benchmark files
+benches/
+**/benches/
+
+# Documentation build
+docs/
+book/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Rust toolchain
+rust-toolchain.toml
+rust-toolchain
+
+# Cargo config
+.cargo/config.toml
+.cargo-credentials
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Archive files
+*.tar.gz
+*.zip
+*.rar
+
+# Large binary files
+*.bin
+*.exe
+*.dll
+*.so
+*.dylib

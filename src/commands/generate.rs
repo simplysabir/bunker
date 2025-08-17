@@ -21,18 +21,22 @@ pub async fn execute(
         exclude_ambiguous: true,
         custom_charset: None,
     };
-    
+
     let password = Crypto::generate_password(&options);
-    
+
     if let Some(k) = key {
         // Save the generated password
         super::add::execute(k.clone(), Some(password.clone()), false, None, vault).await?;
-        println!("{} Generated and saved password for '{}'", "✓".green().bold(), k.cyan());
+        println!(
+            "{} Generated and saved password for '{}'",
+            "✓".green().bold(),
+            k.cyan()
+        );
         println!("Password: {}", password.yellow());
     } else {
         // Just display the password
         println!("{}", password.green().bold());
     }
-    
+
     Ok(())
 }

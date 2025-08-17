@@ -58,6 +58,22 @@ impl Default for EntryType {
     }
 }
 
+impl std::fmt::Display for EntryType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EntryType::Password => write!(f, "Password"),
+            EntryType::Note => write!(f, "Note"),
+            EntryType::Card => write!(f, "Card"),
+            EntryType::Identity => write!(f, "Identity"),
+            EntryType::SecureFile => write!(f, "SecureFile"),
+            EntryType::ApiKey => write!(f, "ApiKey"),
+            EntryType::SshKey => write!(f, "SSH Key"),
+            EntryType::Database => write!(f, "Database"),
+            EntryType::Custom(s) => write!(f, "{}", s),
+        }
+    }
+}
+
 /// Vault configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VaultConfig {
@@ -74,8 +90,8 @@ pub struct VaultConfig {
 /// Encryption settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EncryptionConfig {
-    pub algorithm: String,  // "chacha20poly1305"
-    pub kdf: String,        // "argon2id"
+    pub algorithm: String, // "chacha20poly1305"
+    pub kdf: String,       // "argon2id"
     pub kdf_iterations: u32,
     pub kdf_memory: u32,
     pub kdf_parallelism: u32,
@@ -87,7 +103,7 @@ impl Default for EncryptionConfig {
             algorithm: "chacha20poly1305".to_string(),
             kdf: "argon2id".to_string(),
             kdf_iterations: 3,
-            kdf_memory: 65536,  // 64 MB
+            kdf_memory: 65536, // 64 MB
             kdf_parallelism: 2,
         }
     }
@@ -100,10 +116,10 @@ pub struct Session {
     pub vault_name: String,
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
-    pub key_hash: String,  // For verification
-    pub encrypted_master_key: Vec<u8>,  // Encrypted master key stored securely
-    pub nonce: Vec<u8>,  // Nonce for master key encryption
-    pub salt: Vec<u8>,   // Salt for session key derivation
+    pub key_hash: String,              // For verification
+    pub encrypted_master_key: Vec<u8>, // Encrypted master key stored securely
+    pub nonce: Vec<u8>,                // Nonce for master key encryption
+    pub salt: Vec<u8>,                 // Salt for session key derivation
 }
 
 /// Master key wrapper (zeroized on drop)
@@ -150,7 +166,7 @@ pub struct SearchResult {
     pub entry_type: EntryType,
     pub username: Option<String>,
     pub url: Option<String>,
-    pub score: f32,  // Relevance score
+    pub score: f32, // Relevance score
 }
 
 /// History entry

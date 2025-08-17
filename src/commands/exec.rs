@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::process::Command;
 
 use crate::crypto::Crypto;
@@ -14,24 +14,24 @@ pub async fn execute(
     if command.is_empty() {
         return Err(anyhow!("No command specified"));
     }
-    
+
     let storage = Storage::new(vault)?;
-    
+
     if !storage.vault_exists() {
         return Err(anyhow!("Vault not initialized. Run 'bunker init' first"));
     }
-    
+
     // Get master key
     let master_key = utils::get_master_key(Some(storage.get_vault_name().to_string()))?;
-    
+
     // Load entry
     let entry = storage.load_entry(&key, &master_key)?;
-    
+
     // Decrypt the value
     let decrypted = Crypto::decrypt(&entry.value, &master_key)?;
-    let password = String::from_utf8(decrypted)
-        .map_err(|e| anyhow!("Failed to decode value: {}", e))?;
-    
+    let password =
+        String::from_utf8(decrypted).map_err(|e| anyhow!("Failed to decode value: {}", e))?;
+
     // Prepare command
     let program = &command[0];
     let args: Vec<String> = if env.is_some() {
@@ -50,21 +50,22 @@ pub async fn execute(
             })
             .collect()
     };
-    
+
     // Execute command
     let mut cmd = Command::new(program);
     cmd.args(&args);
-    
+
     if let Some(env_var) = env {
         cmd.env(env_var, &password);
     }
-    
-    let status = cmd.status()
+
+    let status = cmd
+        .status()
         .map_err(|e| anyhow!("Failed to execute command: {}", e))?;
-    
+
     if !status.success() {
         std::process::exit(status.code().unwrap_or(1));
     }
-    
+
     Ok(())
 }
