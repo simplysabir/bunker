@@ -1,0 +1,58 @@
+[package]
+name = "bunker"
+version = "0.1.0"
+edition = "2024"
+authors = ["Sabir Khan <simplysabir@gmail.com>"]
+description = "Dead simple, secure password management"
+license = "MIT"
+repository = "https://github.com/simplysabir/bunker"
+keywords = ["password", "security", "vault", "cli"]
+categories = ["command-line-utilities", "cryptography"]
+
+[[bin]]
+name = "bunker"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive", "env"] }
+anyhow = "1.0"
+thiserror = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+base64 = "0.22"
+hex = "0.4"
+dirs = "5.0"
+chrono = { version = "0.4", features = ["serde"] }
+colored = "2.1"
+dialoguer = "0.11"
+indicatif = "0.17"
+skim = "0.10"  # Fuzzy finder
+clipboard = "0.5"
+rpassword = "7.3"
+which = "6.0"
+shell-words = "1.1"
+uuid = { version = "1.8", features = ["v4", "serde"] }
+git2 = "0.18"
+qrcode = "0.14"
+tempfile = "3.10"
+
+# Crypto
+chacha20poly1305 = "0.10"
+argon2 = "0.5"
+rand = "0.8"
+zeroize = { version = "1.7", features = ["derive"] }
+sha2 = "0.10"
+
+# Async runtime (for future features)
+tokio = { version = "1.36", features = ["full"] }
+
+[dev-dependencies]
+tempdir = "0.3"
+pretty_assertions = "1.4"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
