@@ -47,6 +47,13 @@ sha2 = "0.10"
 # Async runtime (for future features)
 tokio = { version = "1.36", features = ["full"] }
 
+# Archive support
+tar = "0.4"
+flate2 = "1.0"
+
+# Regex support  
+regex = "1.10"
+
 [dev-dependencies]
 tempdir = "0.3"
 pretty_assertions = "1.4"

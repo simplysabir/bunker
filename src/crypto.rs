@@ -182,6 +182,42 @@ impl Crypto {
      pub fn secure_clear(mut data: Vec<u8>) {
         data.zeroize();
     }
+
+    /// Derive session key from user input (for encrypting master key in session)
+    pub fn derive_session_key(user_input: &str, salt: &[u8]) -> Result<Vec<u8>> {
+        let argon2 = Argon2::default();
+        let mut key = vec![0u8; KEY_SIZE];
+        
+        argon2
+            .hash_password_into(user_input.as_bytes(), salt, &mut key)
+            .map_err(|e| anyhow!("Session key derivation failed: {}", e))?;
+        
+        Ok(key)
+    }
+
+    /// Encrypt master key for session storage
+    pub fn encrypt_master_key_for_session(master_key: &MasterKey, session_key: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
+        let cipher = ChaCha20Poly1305::new(Key::from_slice(session_key));
+        let nonce = ChaCha20Poly1305::generate_nonce(&mut ChaChaRng);
+        
+        let ciphertext = cipher
+            .encrypt(&nonce, master_key.key.as_ref())
+            .map_err(|e| anyhow!("Master key encryption failed: {}", e))?;
+        
+        Ok((ciphertext, nonce.to_vec()))
+    }
+
+    /// Decrypt master key from session storage
+    pub fn decrypt_master_key_from_session(ciphertext: &[u8], nonce: &[u8], session_key: &[u8]) -> Result<MasterKey> {
+        let cipher = ChaCha20Poly1305::new(Key::from_slice(session_key));
+        let nonce = Nonce::from_slice(nonce);
+        
+        let plaintext = cipher
+            .decrypt(nonce, ciphertext)
+            .map_err(|e| anyhow!("Master key decryption failed: {}", e))?;
+        
+        Ok(MasterKey::new(plaintext))
+    }
     
 }
 

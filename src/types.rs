@@ -101,6 +101,9 @@ pub struct Session {
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
     pub key_hash: String,  // For verification
+    pub encrypted_master_key: Vec<u8>,  // Encrypted master key stored securely
+    pub nonce: Vec<u8>,  // Nonce for master key encryption
+    pub salt: Vec<u8>,   // Salt for session key derivation
 }
 
 /// Master key wrapper (zeroized on drop)

@@ -1,9 +1,18 @@
 use anyhow::{anyhow, Result};
+use chrono::{DateTime, Utc};
 use git2::{
     Commit, Cred, CredentialType, DiffOptions, FetchOptions, Oid, PushOptions, RemoteCallbacks,
     Repository, Signature, StatusOptions,
 };
 use std::path::Path;
+
+#[derive(Debug, Clone)]
+pub struct CommitInfo {
+    pub hash: String,
+    pub message: String,
+    pub author: String,
+    pub timestamp: DateTime<Utc>,
+}
 
 pub struct Git;
 
@@ -93,56 +102,6 @@ impl Git {
             &["refs/heads/main:refs/heads/main"],
             Some(&mut push_options),
         ).map_err(|e| anyhow!("Failed to push: {}", e))?;
-        
-        Ok(())
-    }
-
-    /// Pull from remote
-    pub fn pull(path: &Path) -> Result<()> {
-        let repo = Repository::open(path)
-            .map_err(|e| anyhow!("Failed to open repository: {}", e))?;
-        
-        let mut remote = repo.find_remote("origin")
-            .map_err(|e| anyhow!("No remote 'origin' configured: {}", e))?;
-        
-        let mut callbacks = RemoteCallbacks::new();
-        callbacks.credentials(|_url, username_from_url, _allowed_types| {
-            Self::credentials_callback(username_from_url)
-        });
-        
-        let mut fetch_options = FetchOptions::new();
-        fetch_options.remote_callbacks(callbacks);
-        
-        remote.fetch(&["main"], Some(&mut fetch_options), None)
-            .map_err(|e| anyhow!("Failed to fetch: {}", e))?;
-        
-        // Fast-forward merge
-        let fetch_head = repo.find_reference("FETCH_HEAD")
-            .map_err(|e| anyhow!("Failed to find FETCH_HEAD: {}", e))?;
-        
-        let fetch_commit = repo.reference_to_annotated_commit(&fetch_head)
-            .map_err(|e| anyhow!("Failed to find fetch commit: {}", e))?;
-        
-        let analysis = repo.merge_analysis(&[&fetch_commit])
-            .map_err(|e| anyhow!("Failed to analyze merge: {}", e))?;
-        
-        if analysis.0.is_fast_forward() {
-            let refname = "refs/heads/main";
-            let mut reference = repo.find_reference(refname)
-                .map_err(|e| anyhow!("Failed to find reference: {}", e))?;
-            
-            reference.set_target(fetch_commit.id(), "Fast-forward")
-                .map_err(|e| anyhow!("Failed to fast-forward: {}", e))?;
-            
-            repo.set_head(refname)
-                .map_err(|e| anyhow!("Failed to set HEAD: {}", e))?;
-            
-            repo.checkout_head(Some(git2::build::CheckoutBuilder::default().force()))
-                .map_err(|e| anyhow!("Failed to checkout: {}", e))?;
-        } else if analysis.0.is_normal() {
-            // Would need merge - for now, error
-            return Err(anyhow!("Merge required - manual intervention needed"));
-        }
         
         Ok(())
     }
@@ -244,32 +203,6 @@ impl Git {
         Ok(diff.deltas().len() > 0)
     }
 
-    /// Restore file from specific commit
-    pub fn restore_file(path: &Path, file: &str, commit_hash: &str) -> Result<Vec<u8>> {
-        let repo = Repository::open(path)
-            .map_err(|e| anyhow!("Failed to open repository: {}", e))?;
-        
-        let oid = Oid::from_str(commit_hash)
-            .map_err(|e| anyhow!("Invalid commit hash: {}", e))?;
-        
-        let commit = repo.find_commit(oid)
-            .map_err(|e| anyhow!("Failed to find commit: {}", e))?;
-        
-        let tree = commit.tree()
-            .map_err(|e| anyhow!("Failed to get tree: {}", e))?;
-        
-        let entry = tree.get_path(Path::new(file))
-            .map_err(|e| anyhow!("File not found in commit: {}", e))?;
-        
-        let object = entry.to_object(&repo)
-            .map_err(|e| anyhow!("Failed to get object: {}", e))?;
-        
-        let blob = object.as_blob()
-            .ok_or_else(|| anyhow!("Object is not a blob"))?;
-        
-        Ok(blob.content().to_vec())
-    }
-
     /// Credentials callback for SSH
     fn credentials_callback(username: Option<&str>) -> Result<Cred, git2::Error> {
         if let Ok(cred) = Cred::ssh_key_from_agent(username.unwrap_or("git")) {
@@ -295,8 +228,8 @@ impl Git {
     }
 
     /// Check if path is a git repository
-    pub fn is_repo(path: &Path) -> bool {
-        Repository::open(path).is_ok()
+    pub fn is_repo(path: &Path) -> Result<bool> {
+        Ok(Repository::open(path).is_ok())
     }
 
     /// Add remote
@@ -306,6 +239,152 @@ impl Git {
         
         repo.remote("origin", url)
             .map_err(|e| anyhow!("Failed to add remote: {}", e))?;
+        
+        Ok(())
+    }
+
+    /// Get git log with optional limit
+    pub fn log(path: &Path, limit: Option<usize>) -> Result<Vec<CommitInfo>> {
+        let repo = Repository::open(path)
+            .map_err(|e| anyhow!("Failed to open repository: {}", e))?;
+        
+        let mut revwalk = repo.revwalk()?;
+        revwalk.push_head()?;
+        
+        let mut commits = Vec::new();
+        let max_commits = limit.unwrap_or(50);
+        
+        for (i, oid) in revwalk.enumerate() {
+            if i >= max_commits { break; }
+            
+            let oid = oid?;
+            let commit = repo.find_commit(oid)?;
+            
+            commits.push(CommitInfo {
+                hash: oid.to_string(),
+                message: commit.message().unwrap_or("").to_string(),
+                author: commit.author().name().unwrap_or("").to_string(),
+                timestamp: chrono::DateTime::from_timestamp(commit.time().seconds(), 0)
+                    .unwrap_or_else(|| chrono::Utc::now()),
+            });
+        }
+        
+        Ok(commits)
+    }
+
+    /// Get git log for specific file
+    pub fn log_file(path: &Path, file_path: &str, limit: Option<usize>) -> Result<Vec<CommitInfo>> {
+        let repo = Repository::open(path)
+            .map_err(|e| anyhow!("Failed to open repository: {}", e))?;
+        
+        let mut revwalk = repo.revwalk()?;
+        revwalk.push_head()?;
+        
+        let mut commits = Vec::new();
+        let max_commits = limit.unwrap_or(50);
+        
+        for (i, oid) in revwalk.enumerate() {
+            if i >= max_commits { break; }
+            
+            let oid = oid?;
+            let commit = repo.find_commit(oid)?;
+            
+            // Check if this commit touches the file
+            let tree = commit.tree()?;
+            if tree.get_path(std::path::Path::new(file_path)).is_ok() {
+                commits.push(CommitInfo {
+                    hash: oid.to_string(),
+                    message: commit.message().unwrap_or("").to_string(),
+                    author: commit.author().name().unwrap_or("").to_string(),
+                    timestamp: chrono::DateTime::from_timestamp(commit.time().seconds(), 0)
+                        .unwrap_or_else(|| chrono::Utc::now()),
+                });
+            }
+        }
+        
+        Ok(commits)
+    }
+
+    /// Pull from remote
+    pub fn pull(path: &Path) -> Result<Vec<CommitInfo>> {
+        let repo = Repository::open(path)
+            .map_err(|e| anyhow!("Failed to open repository: {}", e))?;
+        
+        // Fetch from origin
+        let mut remote = repo.find_remote("origin")?;
+        remote.fetch(&["refs/heads/*:refs/remotes/origin/*"], None, None)?;
+        
+        // Get commits that will be merged
+        let head = repo.head()?.target().unwrap();
+        let origin_head = repo.find_reference("refs/remotes/origin/master")
+            .or_else(|_| repo.find_reference("refs/remotes/origin/main"))?
+            .target().unwrap();
+        
+        let mut commits = Vec::new();
+        if head != origin_head {
+            // Fast-forward merge
+            let head_commit = repo.find_commit(head)?;
+            let origin_commit = repo.find_commit(origin_head)?;
+            
+            let mut revwalk = repo.revwalk()?;
+            revwalk.push(origin_head)?;
+            revwalk.hide(head)?;
+            
+            for oid in revwalk {
+                let oid = oid?;
+                let commit = repo.find_commit(oid)?;
+                commits.push(CommitInfo {
+                    hash: oid.to_string(),
+                    message: commit.message().unwrap_or("").to_string(),
+                    author: commit.author().name().unwrap_or("").to_string(),
+                    timestamp: chrono::DateTime::from_timestamp(commit.time().seconds(), 0)
+                        .unwrap_or_else(|| chrono::Utc::now()),
+                });
+            }
+            
+            // Update HEAD to origin HEAD
+            repo.head()?.set_target(origin_head, "pull: Fast-forward")?;
+            
+            // Update working directory
+            let mut checkout = git2::build::CheckoutBuilder::new();
+            checkout.force();
+            repo.checkout_head(Some(&mut checkout))?;
+        }
+        
+        Ok(commits)
+    }
+
+    /// Restore file from specific commit
+    pub fn restore_file(path: &Path, commit_hash: &str, file_path: &str) -> Result<()> {
+        let repo = Repository::open(path)
+            .map_err(|e| anyhow!("Failed to open repository: {}", e))?;
+        
+        let oid = git2::Oid::from_str(commit_hash)?;
+        let commit = repo.find_commit(oid)?;
+        let tree = commit.tree()?;
+        
+        let entry = tree.get_path(std::path::Path::new(file_path))?;
+        let blob = repo.find_blob(entry.id())?;
+        
+        let file_full_path = path.join(file_path);
+        if let Some(parent) = file_full_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(file_full_path, blob.content())?;
+        
+        Ok(())
+    }
+
+    /// Restore entire repository to specific commit
+    pub fn restore_commit(path: &Path, commit_hash: &str) -> Result<()> {
+        let repo = Repository::open(path)
+            .map_err(|e| anyhow!("Failed to open repository: {}", e))?;
+        
+        let oid = git2::Oid::from_str(commit_hash)?;
+        let commit = repo.find_commit(oid)?;
+        
+        // Reset HEAD to the commit
+        repo.reset(&commit.as_object(), git2::ResetType::Hard, None)?;
         
         Ok(())
     }

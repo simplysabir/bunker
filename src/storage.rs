@@ -32,6 +32,16 @@ impl Storage {
         Ok(base_dir.join("vaults").join(vault_name))
     }
 
+    /// Get this vault's path
+    pub fn get_vault_path(&self) -> &PathBuf {
+        &self.vault_path
+    }
+
+    /// Get this vault's name
+    pub fn get_vault_name(&self) -> &str {
+        &self.vault_name
+    }
+
     /// Get base directory for bunker
     pub fn base_dir() -> Result<PathBuf> {
         let home = dirs::home_dir()
@@ -202,7 +212,7 @@ impl Storage {
         self.vault_path.join("store").join(format!("{}.json", safe_key))
     }
 
-    /// Store session
+    /// Store session with encrypted master key
     pub fn store_session(&self, session: &Session) -> Result<()> {
         let session_dir = Self::base_dir()?.join("sessions");
         fs::create_dir_all(&session_dir)?;
@@ -212,6 +222,53 @@ impl Storage {
         fs::write(session_path, session_json)?;
         
         Ok(())
+    }
+
+    /// Create and store new session with master key
+    pub fn create_session(&self, master_key: &MasterKey, session_password: &str, duration_hours: u64) -> Result<Session> {
+        use chrono::Duration;
+        
+        // Generate session salt and derive session key
+        let salt = Crypto::generate_salt();
+        let session_key = Crypto::derive_session_key(session_password, &salt)?;
+        
+        // Encrypt master key for storage
+        let (encrypted_master_key, nonce) = Crypto::encrypt_master_key_for_session(master_key, &session_key)?;
+        
+        // Create session
+        let session = Session {
+            id: uuid::Uuid::new_v4(),
+            vault_name: self.vault_name.clone(),
+            created_at: Utc::now(),
+            expires_at: Utc::now() + Duration::hours(duration_hours as i64),
+            key_hash: Crypto::hash_password(session_password)?,
+            encrypted_master_key,
+            nonce,
+            salt,
+        };
+        
+        self.store_session(&session)?;
+        Ok(session)
+    }
+
+    /// Load master key from session
+    pub fn load_master_key_from_session(&self, session_password: &str) -> Result<MasterKey> {
+        let session = self.load_session()?;
+        
+        // Verify session password
+        if !Crypto::verify_password(session_password, &session.key_hash)? {
+            return Err(anyhow!("Invalid session password"));
+        }
+        
+        // Derive session key and decrypt master key
+        let session_key = Crypto::derive_session_key(session_password, &session.salt)?;
+        let master_key = Crypto::decrypt_master_key_from_session(
+            &session.encrypted_master_key,
+            &session.nonce,
+            &session_key
+        )?;
+        
+        Ok(master_key)
     }
 
     /// Load session

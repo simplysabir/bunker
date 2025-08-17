@@ -188,28 +188,79 @@ pub fn format_tree(entries: &[String], prefix: &str) -> String {
     tree
 }
 
-/// Get master key (from session or prompt)
+/// Get master key (from session or prompt) - Smart authentication
 pub fn get_master_key(vault_name: Option<String>) -> Result<MasterKey> {
     let storage = Storage::new(vault_name)?;
     
-    // Try to load from session
-    if let Ok(session) = storage.load_session() {
-        // Session exists, derive key from cached password
-        // Note: In production, we'd store encrypted key in session
-        // For simplicity, we're prompting again
-        let password = prompt_password("Enter master password")?;
-        let config = storage.load_config()?;
-        let salt = session.key_hash.as_bytes(); // Use hash as salt (simplified)
-        return Crypto::derive_key(&password, salt);
+    // Try to load from existing session
+    if let Ok(_session) = storage.load_session() {
+        // Session exists, try to use stored session password
+        if let Ok(session_password) = get_cached_session_password() {
+            if let Ok(master_key) = storage.load_master_key_from_session(&session_password) {
+                return Ok(master_key);
+            }
+        }
+        
+        // Session exists but can't decrypt, ask for session password
+        println!("{}", "🔐 Vault is locked. Enter your session password to unlock:".cyan());
+        let session_password = prompt_password("Session password")?;
+        
+        match storage.load_master_key_from_session(&session_password) {
+            Ok(master_key) => {
+                // Cache session password for this terminal session
+                cache_session_password(&session_password)?;
+                return Ok(master_key);
+            }
+            Err(_) => {
+                // Invalid session password, clear session and continue to master password
+                let _ = storage.clear_session();
+                println!("{}", "Invalid session password. Please enter your master password.".yellow());
+            }
+        }
     }
     
-    // No session, prompt for password
+    // No valid session, prompt for master password
     let password = prompt_password("Enter master password")?;
     
     // Derive key with vault-specific salt
     let config = storage.load_config()?;
     let salt = config.id.as_bytes();
-    Crypto::derive_key(&password, salt)
+    let master_key = Crypto::derive_key(&password, salt)?;
+    
+    // Create new session for convenience (24 hours default)
+    let session_password = generate_session_password();
+    let _ = storage.create_session(&master_key, &session_password, 24);
+    cache_session_password(&session_password)?;
+    
+    println!("{}", "✓ Session created. You won't need to enter your password again for 24 hours.".green());
+    
+    Ok(master_key)
+}
+
+/// Generate a random session password
+fn generate_session_password() -> String {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    (0..32)
+        .map(|_| {
+            let chars = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+            chars[rng.gen_range(0..chars.len())] as char
+        })
+        .collect()
+}
+
+/// Cache session password in memory (environment variable for this process)
+fn cache_session_password(password: &str) -> Result<()> {
+    unsafe {
+        std::env::set_var("BUNKER_SESSION_KEY", password);
+    }
+    Ok(())
+}
+
+/// Get cached session password from memory
+fn get_cached_session_password() -> Result<String> {
+    std::env::var("BUNKER_SESSION_KEY")
+        .map_err(|_| anyhow!("No cached session password"))
 }
 
 /// Parse key-value pairs from string
