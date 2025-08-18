@@ -5,7 +5,7 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(name = "bunker")]
 #[command(about = "Dead simple, secure password management")]
-#[command(version = "1.0.0")]
+#[command(version = "1.1.0")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,

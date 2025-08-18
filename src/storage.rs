@@ -505,8 +505,9 @@ impl Storage {
 
         // Extract and save config
         let mut config: VaultConfig = serde_json::from_value(vault_data["vault_config"].clone())?;
+        // Preserve the original vault ID so the KDF salt remains consistent across devices
+        // This ensures the derived master key matches the one used to encrypt the entries
         config.name = vault_name.to_string();
-        config.id = Uuid::new_v4();
         storage.init_vault(config)?;
 
         // Import entries
